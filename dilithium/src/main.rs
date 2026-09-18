@@ -104,8 +104,8 @@ fn print_timing_info(count: usize) {
 
     use std::convert::TryInto;
 
-    println!("iterations: {}, verify success count: {}, message length: 1024bytes",
-        count, verify_success_count);
+    println!("iterations: {}, verify success count: {}, message length: {}bytes",
+        count, verify_success_count, msg.len());
     println!("average ppk time:       {:.3?}", ppk_duration / count.try_into().unwrap());
     println!("average keygen time:    {:.3?}", keygen_duration / count.try_into().unwrap());
     println!("average signature time: {:.3?}", sig_duration / count.try_into().unwrap());
