@@ -1,172 +1,77 @@
-<p align="center">
-  <img src="./dilithium.png"/>
-</p>
+# EUROCRYPT
 
+To implement our Certificateless Signature Scheme we have modified the
+dilithium implementation present at [Argyle-Software/dilithium](https://github.com/Argyle-Software/dilithium).
+The modified code is present in the `dilithium` directory.
 
-# Dilithium
-[![Build Status](https://github.com/Argyle-Software/dilithium/actions/workflows/kat.yml/badge.svg)](https://github.com/Argyle-Software/dilithium/actions)
-[![Crates](https://img.shields.io/crates/v/pqc-dilithium)](https://crates.io/crates/pqc-dilithium)
-[![License](https://img.shields.io/crates/l/pqc_dilithium)](https://github.com/Argyle-Software/dilithium/blob/master/LICENSE-MIT)
-[![License](https://img.shields.io/crates/l/pqc_dilithium)](https://github.com/Argyle-Software/dilithium/blob/master/LICENSE-APACHE)
+We compare the running times of our proposed Certificateless Signature Scheme, as printed `NOPKI` in the console, with that of a version of dilithium that use PKI infrastructure, as printed `Baseline Dilithium` in the console.
 
-A rust implementation of the Dilithium, a KEM standardised by the NIST Post-Quantum Standardization Project.
+The comparisons are happening for differnt modes of dilithium. The three modes of dilithium `mode2`, `mode3`, and `mode5` provide different levels of security, respectively 128-bit, 192-bit, and 256-bit of security.
 
-See the [**features**](#features) section for different options regarding security levels and modes of operation. The default security setting is Dilithium3.
+## Running the benchmarks.
+To run the benchmark for any level of dilithim just go to the `dilithium` directory.
 
-It is recommended to use Dilithium in a hybrid system alongside a traditional signature algorithm such as ed25519. 
+```
+cd dilithium
+```
 
-**Minimum Supported Rust Version: 1.50.0**
+The run any of the following commands:
 
----
+For mode2:
+```
+cargo run --release --features mode2
+```
 
-## Installation
+For mode3:
+```
+cargo run --release --features mode3
+```
+
+For mode5:
+```
+cargo run --release --features mode5
+```
+
+By default, just running
 
 ```shell
-cargo add pqc_dilithium
-``` 
-
-## Usage 
-
-```rust
-use pqc_dilithium::*;
+cargo run --release
 ```
 
-### Key Generation
-```rust
-let keys = Keypair::generate();
-assert!(keys.public.len() == PUBLICKEYBYTES);
-assert!(keys.expose_secret().len() == SECRETKEYBYTES);
+...will print a helpful error message and ask to select a mode.
+
+This might take a few seconds to compile and run.
+
+NOTE: you will need `Rust` setup and its package manager `cargo` for this. To know how to
+install Rust, follow [Install Rust](https://rust-lang.org/tools/install/).
+
+For example, the above commands will print something like this.
+
+```
+------------------NOPKI - mode2----------------
+iterations: 1000, message length: 1024bytes
+average ppk time:       492.634µs
+average keygen time:    727.057µs
+average signature time: 499.767µs
+average verify time:    338.064µs
+
+----------------Baseline Dilithium---------------
+iterations: 1000
+average keygen time:    109.997µs
+average signature time: 392.252µs
+average verify time:    116.739µs
+
 ```
 
-### Signing 
-```rust
-let msg = "Hello".as_bytes();
-let sig = keys.sign(&msg);
-assert!(sig.len() == SIGNBYTES);
-```
+This compares our NO-PKI dilithium with one that uses PKI infrastructure.
 
-### Verification
-```rust
-let sig_verify = verify(&sig, &msg, &keys.public);
-assert!(sig_verify.is_ok());
-```
+This particular run is for dilithium2, i.e. it was ran with `--features mode2` CLI option.
 
----
+`ppk time`: time taken to generate partial private key. \
+`keygen time`: time taken to generate public and secret key \
+`sig time`: time taken to sign a message \
+`verify time`: time taken to verify the signature for a message
 
-## AES mode
+...and also print the number of times the whole process is done. By default 1000
+iterations are done, each for a different message of length 1024 bytes.
 
-Dilithium-AES, that uses AES-256 in counter mode instead of SHAKE to 
-expand the matrix and the masking vectors, and to sample the secret polynomials.
-This offers hardware speedups on certain platforms.
-
----
-
-## Randomized signing
-
-One may want to consider randomized signatures in situations where the side channel
-attacks of [SBB+18, PSS+18] exploiting determinism are applicable. Another situation
-where one may want to avoid determinism is when the signer does not wish to reveal the
-message that is being signed. While there is no timing leakage of the secret key, there is
-timing leakage of the message if the scheme is deterministic. Since the randomness of the
-scheme is derived from the message, the number of aborts for a particular message will
-always be the same.
-
----
-
-## Features
-
-By default this library uses Dilithium3
-
-| Name           | Description                                                                                                       |
-|----------------|-------------------------------------------------------------------------------------------------------------------|
-| mode2          | Uses Dilithium2                                                                                                   |
-| mode5          | Uses Dilithium5                                                                                                   |
-| aes            | Uses AES256-CTR instead of SHAKE                                                                                  |
-| random_signing | Enables randomized signing of messages                                                                            |
-| wasm           | For compiling to WASM targets                                                                                     |
-
----
-
-## Testing 
-
-To run the known answer tests, you'll need to enable the `dilithium_kat` in `RUSTFLAGS` eg.
-
-```shell
-RUSTFLAGS="--cfg dilithium_kat" cargo test
-```
-
-To run through all possible features use the [`test_matrix.sh`](./tests/test_matrix.sh) script.
-
----
-
-## Benchmarking
-
-This library uses the criterion benchmarking suite. To use you must enable
-`bench` eg.
-
-```shell
-RUSTFLAGS="--cfg bench" cargo bench
-```
-
----
-
-## WebAssembly
-
-To compile the wasm files yourself you need to enable the `wasm` feature.
-
-For example, using [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/):
-
-```shell
-wasm-pack build -- --features wasm
-```
-
-Which will export the wasm, javascript and  typescript files into `./pkg/`. 
-
-To compile a different variant into a separate folder: 
-```shell
-wasm-pack build --out-dir pkg_mode5/ -- --features "wasm mode5" 
-```
-
-There is also a basic html demo in the [www](./www/readme.md) folder.
- 
-From the www folder run: 
-
-```shell
-npm install
-npm run start
-```
-
----
-
-## Alternatives
-
-The PQClean project has rust bindings for their C post quantum libraries. 
-
-https://github.com/rustpq/pqcrypto/tree/main/pqcrypto-dilithium
-
---- 
-
-## About
-
-Dilithium is a digital signature scheme that is strongly secure under chosen message attacks based on the hardness of lattice problems over module lattices. The security notion means that an adversary having access to a signing oracle cannot produce a signature of a message whose signature he hasn't yet seen, nor produce a different signature of a message that he already saw signed. Dilithium has been standardised by the [NIST post-quantum cryptography project](https://csrc.nist.gov/Projects/post-quantum-cryptography/selected-algorithms-2022).
-
-The official website: https://pq-crystals.org/dilithium/
-
-Authors of the Dilithium Algorithm: 
-
-* Roberto Avanzi, ARM Limited (DE)
-* Joppe Bos, NXP Semiconductors (BE)
-* Léo Ducas, CWI Amsterdam (NL)
-* Eike Kiltz, Ruhr University Bochum (DE)
-* Tancrède Lepoint, SRI International (US)
-* Vadim Lyubashevsky, IBM Research Zurich (CH)
-* John M. Schanck, University of Waterloo (CA)
-* Peter Schwabe, Radboud University (NL)
-* Gregor Seiler, IBM Research Zurich (CH)
-* Damien Stehle, ENS Lyon (FR)
-
----
-
-## Contributing
-
-Contributions welcome. For pull requests create a feature fork, by submitting PR's you agree for the code to be dual licensed under MIT/Apache 2.0

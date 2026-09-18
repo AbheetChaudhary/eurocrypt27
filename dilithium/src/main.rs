@@ -1,6 +1,6 @@
 #![allow(dead_code, unused)]
 
-use pqc_dilithium::euro;
+use pqc_dilithium::nopki;
 use std::time::{Instant, Duration};
 
 /*
@@ -11,17 +11,17 @@ fn main() {
     let mut identity = [0u8; 64];
     rand::fill(&mut identity);
 
-    let (params, mpk, msk, ppk, upk) = euro::kgc_setup(&identity, &rho);
+    let (params, mpk, msk, ppk, upk) = nopki::kgc_setup(&identity, &rho);
 
-    let (pk, sk) = euro::user_keygen(params, ppk, &identity, upk, msk);
+    let (pk, sk) = nopki::user_keygen(params, ppk, &identity, upk, msk);
 
     // let message: &[u8] = b"lorem ipsum dolor sit amet";
 
     let mut message = vec![0u8; 4096];
     rand::fill(&mut message);
-    let sig = euro::sign(params, pk, sk, &identity, &message);
+    let sig = nopki::sign(params, pk, sk, &identity, &message);
 
-    let verify_result = euro::verify(params, mpk, pk, upk, &identity, &message, sig);
+    let verify_result = nopki::verify(params, mpk, pk, upk, &identity, &message, sig);
 
     if verify_result {
         println!("verify success!");
@@ -80,19 +80,19 @@ fn print_timing_info(count: usize) {
         rand::fill(&mut msg);
 
         let ppk_begin = Instant::now();
-        let (params, mpk, msk, ppk, upk) = euro::kgc_setup(&identity, &rho);
+        let (params, mpk, msk, ppk, upk) = nopki::kgc_setup(&identity, &rho);
         ppk_duration += ppk_begin.elapsed();
 
         let keygen_begin = Instant::now();
-        let (pk, sk) = euro::user_keygen(params, ppk, &identity, upk, msk);
+        let (pk, sk) = nopki::user_keygen(params, ppk, &identity, upk, msk);
         keygen_duration += keygen_begin.elapsed();
 
         let sig_begin = Instant::now();
-        let sig = euro::sign(params, pk, sk, &identity, &msg);
+        let sig = nopki::sign(params, pk, sk, &identity, &msg);
         sig_duration += sig_begin.elapsed();
 
         let verify_begin = Instant::now();
-        let verify_result = euro::verify(params, mpk, pk, upk, &identity, &msg, sig);
+        let verify_result = nopki::verify(params, mpk, pk, upk, &identity, &msg, sig);
         verify_duration += verify_begin.elapsed();
 
         if verify_result {
@@ -119,21 +119,23 @@ fn baseline_dilithium_timings(count: usize) {
 
     let mut i = 0;
 
-    let msg = b"lorem ipsum dolor sit amet";
+    let mut msg = vec![0u8; 1024];
 
     use pqc_dilithium as baseline;
 
     while i < count {
+        rand::fill(&mut msg);
+
         let begin_keygen = Instant::now();
         let keypair = baseline::Keypair::generate();
         keygen_duration += begin_keygen.elapsed();
 
         let begin_signature = Instant::now();
-        let signature = keypair.sign(msg);
+        let signature = keypair.sign(&msg);
         signature_duration += begin_signature.elapsed();
 
         let begin_verify = Instant::now();
-        let verify_result = baseline::verify(&signature, msg, &keypair.public);
+        let verify_result = baseline::verify(&signature, &msg, &keypair.public);
         verify_duration += begin_verify.elapsed();
 
         if verify_result.is_err() {
