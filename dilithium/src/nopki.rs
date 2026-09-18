@@ -1,5 +1,7 @@
 #![allow(unused)]
 
+use core::cell::Cell;
+
 use crate::{
     params::*,
     poly::*,
@@ -32,9 +34,9 @@ pub struct MasterKey {
 }
 
 pub struct PartialPrivateKey {
-    e11_prime: Polyveck,
+    e11: Polyveck,
     b11_l: Polyveck,
-    user_secret: [u8; 32], // TODO: why is user secret in public partial private key?
+    user_secret: [u8; 32],
 }
 
 #[derive(Copy, Clone)]
@@ -51,7 +53,6 @@ pub fn kgc_setup(identity: &[u8], rho: &[u8]) -> (Params, Mpk, MasterKey,
     // Assert sizes on identity and rho.
     assert_eq!(rho.len(), SEEDBYTES);
     assert_eq!(identity.len(), ID_SIZE);
-
 
     // Compute r0, and r1.
     let mut seedbuf = [0u8; SEEDBYTES + CRHBYTES]; // 64 + 32.
@@ -99,14 +100,6 @@ pub fn kgc_setup(identity: &[u8], rho: &[u8]) -> (Params, Mpk, MasterKey,
     let mut e11_ntt = e11;
     polyveck_ntt(&mut e11_ntt);
 
-    // TODO: how to sample ek correctly?
-    let mut ek = Polyveck::default();
-    polyveck_uniform_eta(&mut ek, &r1, 2 * L_U16);
-
-    // Compute e11_prime.
-    let mut e11_prime = e11;
-    polyveck_add(&mut e11_prime, &ek);
-
     // Compute b11.
     let mut b11 = Polyveck::default();
     polyvec_matrix_pointwise_montgomery(&mut b11, &mat_a11_ntt, &s11_ntt);
@@ -147,8 +140,6 @@ pub fn kgc_setup(identity: &[u8], rho: &[u8]) -> (Params, Mpk, MasterKey,
 
         // Sample a user secret based on the hash of iter_idx. Better randomness
         // could be used.
-        //
-        // TODO: what is the correct way to smaple this user secret?
         shake256(&mut user_secret, SECRET_SIZE, &iter_idx.to_ne_bytes(),
             size_of::<usize>());
 
@@ -281,6 +272,7 @@ pub fn kgc_setup(identity: &[u8], rho: &[u8]) -> (Params, Mpk, MasterKey,
         let n = polyveck_make_hint_simple(&mut h1, &neg_c1_b11_l, &hint_from);
 
         if n > OMEGA as i32 {
+            // println!("kgc: omega fail: n: {n}, omega: {OMEGA}");
             iter_idx += 1;
             continue;
         }
@@ -301,7 +293,7 @@ pub fn kgc_setup(identity: &[u8], rho: &[u8]) -> (Params, Mpk, MasterKey,
         };
 
         let ppk = PartialPrivateKey {
-            e11_prime: e11_prime,
+            e11: e11,
             b11_l: b11_l,
             user_secret: user_secret,
         };
@@ -320,8 +312,9 @@ pub struct SecretKey {
     b12_l: Polyveck,
     y11: Polyvecl,
     y12: Polyvecl,
-    s11: Polyvecl,
-    e11_prime: Polyveck,
+    s12: Polyvecl,
+    e11: Polyveck,
+    e12: Polyveck,
 }
 
 #[derive(Copy, Clone)]
@@ -344,7 +337,7 @@ pub fn user_keygen(
 
     // Unpack arguments.
     let Params { rho } = params;
-    let PartialPrivateKey { e11_prime, b11_l, user_secret } = ppk;
+    let PartialPrivateKey { e11, b11_l, user_secret } = ppk;
     let UserKey { z1, h1, c1_hashed } = upk;
     let MasterKey { s11 } = msk;
 
@@ -353,8 +346,8 @@ pub fn user_keygen(
     assert_eq!(identity.len(), ID_SIZE);
 
     // NTT forms for later use.
-    let mut e11_prime_ntt = e11_prime;
-    polyveck_ntt(&mut e11_prime_ntt);
+    let mut e11_ntt = e11;
+    polyveck_ntt(&mut e11_ntt);
 
     let mut b11_l_ntt = b11_l;
     polyveck_ntt(&mut b11_l_ntt);
@@ -524,12 +517,12 @@ pub fn user_keygen(
         polyvecl_reduce(&mut z2);
         polyvecl_add(&mut z2, &y12);
 
-        // c1*e11_prime
-        let mut c1_e11_prime = Polyveck::default();
+        // c1*e11
+        let mut c1_e11 = Polyveck::default();
 
-        polyveck_pointwise_poly_montgomery(&mut c1_e11_prime, &c1_ntt, &e11_prime_ntt);
-        polyveck_invntt_tomont(&mut c1_e11_prime);
-        polyveck_reduce(&mut c1_e11_prime);
+        polyveck_pointwise_poly_montgomery(&mut c1_e11, &c1_ntt, &e11_ntt);
+        polyveck_invntt_tomont(&mut c1_e11);
+        polyveck_reduce(&mut c1_e11);
 
         // c2*e12
         let mut c2_e12 = Polyveck::default();
@@ -537,10 +530,10 @@ pub fn user_keygen(
         polyveck_invntt_tomont(&mut c2_e12);
         polyveck_reduce(&mut c2_e12);
 
-        // r_poly = v1 - c2*e12 - c1*e11_prime
+        // r_poly = v1 - c2*e12 - c1*e11
         let mut r_poly = v1;
         polyveck_sub(&mut r_poly, &c2_e12);
-        polyveck_sub(&mut r_poly, &c1_e11_prime);
+        polyveck_sub(&mut r_poly, &c1_e11);
 
         // Decompose r1.
         let (mut r_h, mut r_l) = (Polyveck::default(), Polyveck::default());
@@ -596,10 +589,10 @@ pub fn user_keygen(
             continue;
         }
 
-        // Compute: v1 - (c1*e11_prime + c2*e12) + (c1*b11_l + c2*b12_l)
+        // Compute: v1 - (c1*e11 + c2*e12) + (c1*b11_l + c2*b12_l)
         let mut hint_from = v1;
 
-        let mut c_e = c1_e11_prime;
+        let mut c_e = c1_e11;
         polyveck_add(&mut c_e, &c2_e12);
         polyveck_reduce(&mut c_e);
 
@@ -617,11 +610,16 @@ pub fn user_keygen(
         let n = polyveck_make_hint_simple(&mut h2, &neg_c_b_l, &hint_from);
 
         if n > OMEGA as i32 {
+            // println!("userkeygen: omega fail: n: {n}, omega: {OMEGA}");
             iter_idx += 1;
             continue;
         }
 
         // c3 = CRH(c1 || c2 || v1_h)
+
+        // Reduce v1_h before packing and hashing.
+        polyveck_reduce(&mut v1_h);
+        polyveck_caddq(&mut v1_h);
         let mut v1_h_packed = [0u8; K * POLYW1_PACKEDBYTES];
         polyveck_pack_w1(v1_h_packed.as_mut_slice(), &v1_h);
 
@@ -639,8 +637,9 @@ pub fn user_keygen(
             b12_l,
             y11,
             y12,
-            s11,
-            e11_prime,
+            s12,
+            e11,
+            e12,
         };
 
         let pk = PublicKey {
@@ -670,7 +669,7 @@ pub fn sign(params: Params, pk: PublicKey, sk: SecretKey, identity: &[u8], messa
     // Unpack arguments.
     let Params { rho } = params;
     let PublicKey { b12_h, z2, h2, c2_hashed, c3_hashed } = pk;
-    let SecretKey { b12_l, y11, y12, s11, e11_prime } = sk;
+    let SecretKey { b12_l, y11, y12, s12, e11, e12 } = sk;
 
     // Some assertions about lengths.
     assert_eq!(rho.len(), SEEDBYTES);
@@ -704,23 +703,12 @@ pub fn sign(params: Params, pk: PublicKey, sk: SecretKey, identity: &[u8], messa
         polyvecl_ntt(&mut mat_a12_ntt[i]);
     }
 
-    // Sample s12, e12
-    let mut s12 = Polyvecl::default();
-    let mut e12 = Polyveck::default();
-
-    polyvecl_uniform_eta(&mut s12, &r1, 0);
-    polyveck_uniform_eta(&mut e12, &r1, L_U16);
-
     // NTT forms of s12, e12.
     let mut s12_ntt = s12;
     polyvecl_ntt(&mut s12_ntt);
 
     let mut e12_ntt = e12;
     polyveck_ntt(&mut e12_ntt);
-
-    // ------------------------------------------------------------
-    // (z_i, h_i) := bottom
-    // ------------------------------------------------------------
 
     let mut iter_idx: usize = 0;
 
@@ -729,13 +717,6 @@ pub fn sign(params: Params, pk: PublicKey, sk: SecretKey, identity: &[u8], messa
         // Sample y_i <- S^(n)_{gamma1-1}
         let mut y_i = Polyvecl::default();
 
-        // TODO:
-        //
-        // The paper says to sample y_i directly.
-        // Need the exact randomness/nonce convention here.
-        //
-        // For now, use r1 + iter_idx as the sampling seed/nonce,
-        // following the convention used for y12 in user_keygen().
         polyvecl_uniform_gamma1(&mut y_i, &r1, iter_idx as u16);
 
         // NTT form for matrix multiplication.
@@ -758,8 +739,6 @@ pub fn sign(params: Params, pk: PublicKey, sk: SecretKey, identity: &[u8], messa
 
         // c_i := H(ID || v_i^h || m_i)
         //
-        // c_i in B_60 := F(c_i)
-        // 
         // Pack v_i^h before hashing.
         let mut v_i_h_packed = [0u8; K * POLYW1_PACKEDBYTES];
 
@@ -779,7 +758,6 @@ pub fn sign(params: Params, pk: PublicKey, sk: SecretKey, identity: &[u8], messa
         // c_i in B_60 := F(c_i)
         let mut c_i_ntt = Poly::default();
 
-        // TODO: is 60 the correct omega for this?
         poly_challenge_nonced(&mut c_i_ntt, &c_i_hashed, 0);
         poly_ntt(&mut c_i_ntt);
 
@@ -868,6 +846,7 @@ pub fn sign(params: Params, pk: PublicKey, sk: SecretKey, identity: &[u8], messa
 
         // Check number of hint bits.
         if n > OMEGA as i32 {
+            // println!("sign: omega fail: n: {n}, omega: {OMEGA}");
             iter_idx += 1;
             continue;
         }
@@ -883,18 +862,6 @@ pub fn sign(params: Params, pk: PublicKey, sk: SecretKey, identity: &[u8], messa
     }
 }
 
-// ---------------------------------------------------------------------------
-
-/// Verify signature sign_i = (z_i, h_i, c_i).
-///
-/// TODO: The paper's Algorithm 4 lists pk/upk somewhat differently from the
-/// structs used by the implementation. In particular, verification needs
-/// b11_h, so Mpk is included as an argument here.
-///
-/// TODO: The paper says upk = (v1_h), but our current UserKey contains
-/// (z1, h1, c1_hashed) instead. The code below follows the available structs.
-/// If v1_h is stored explicitly in the real protocol, use that value where
-/// indicated.
 pub fn verify(
     params: Params,
     mpk: Mpk,
@@ -1020,6 +987,7 @@ pub fn verify(
     // Multiply by 2^d.
     let mut c_b_h_shifted = c_b_h;
     polyveck_shiftl(&mut c_b_h_shifted);
+    polyveck_reduce(&mut c_b_h_shifted);
 
     // A11*z1 + A12*z2 - (c1*b11_h + c2*b12_h)*2^d
     let mut prehint_1 = a_z;
@@ -1053,22 +1021,12 @@ pub fn verify(
     // Assuming this to be true, as we just created the hints in above
     // functions.
 
-    /*
-    let h1_weight = count_hint_ones(&h1);
-
-    if h1_weight > OMEGA {
-        return false;
-    }
-
-    // Check number of hint bits in h2.
-    let h2_weight = count_hint_ones(&h2);
-
-    if h2_weight > OMEGA {
-        return false;
-    }
-    */
-
     // c3 = H(c1 || c2 || v1_prime)
+
+    // Reduce v1_prime before packing and hashing.
+    polyveck_reduce(&mut v1_prime);
+    polyveck_caddq(&mut v1_prime);
+
     let mut v1_prime_packed = [0u8; K * POLYW1_PACKEDBYTES];
     polyveck_pack_w1(v1_prime_packed.as_mut_slice(), &v1_prime);
 
@@ -1111,6 +1069,7 @@ pub fn verify(
     // Multiply c_i*b12_h by 2^d.
     let mut c_i_b12_h_shifted = c_i_b12_h;
     polyveck_shiftl(&mut c_i_b12_h_shifted);
+    polyveck_reduce(&mut c_i_b12_h_shifted);
 
     // A12*z_i - c_i*b12_h*2^d
     let mut prehint_i = a12_zi;
@@ -1119,12 +1078,7 @@ pub fn verify(
     polyveck_reduce(&mut prehint_i);
     polyveck_caddq(&mut prehint_i);
 
-    // -----------------------------------------------------------------------
     // v_i_prime = UseHint_q(h_i, ..., 2*gamma2)
-    // -----------------------------------------------------------------------
-
-    // TODO: Replace this pseudocode with the actual UseHint_q implementation.
-    //
     let mut v_i_prime = Polyveck::default();
     polyveck_use_hint_simple(&mut v_i_prime, &h_i, &prehint_i);
 

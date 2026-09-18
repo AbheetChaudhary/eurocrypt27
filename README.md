@@ -49,7 +49,7 @@ For example, the above commands will print something like this.
 
 ```
 ------------------NOPKI - mode2----------------
-iterations: 1000, message length: 1024bytes
+iterations: 1000, verify success count: 1000, message length: 1024bytes
 average ppk time:       492.634µs
 average keygen time:    727.057µs
 average signature time: 499.767µs
@@ -72,6 +72,7 @@ This particular run is for dilithium2, i.e. it was ran with `--features mode2` C
 `sig time`: time taken to sign a message \
 `verify time`: time taken to verify the signature for a message
 
-...and also print the number of times the whole process is done. By default 1000
+...and also print the number of times the whole process is done and for how
+many iterations we successfully verified the signature. By default 1000
 iterations are done, each for a different message of length 1024 bytes.
 
